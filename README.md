@@ -1,38 +1,39 @@
-[![progress-banner](https://backend.codecrafters.io/progress/dns-server/bf096acb-5f98-4f93-a068-91dd279f2519)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# DNS Server in Rust -> Notes
 
-This is a starting point for Rust solutions to the
-["Build Your Own DNS server" Challenge](https://app.codecrafters.io/courses/dns-server/overview).
+## Message format
 
-In this challenge, you'll build a DNS server that's capable of parsing and
-creating DNS packets, responding to DNS queries, handling various record types
-and doing recursive resolve. Along the way we'll learn about the DNS protocol,
-DNS packet format, root servers, authoritative servers, forwarding servers,
-various record types (A, AAAA, CNAME, etc) and more.
+5 sections:
+1. Header
+2. Question
+3. Authority
+4. additional space
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+## Header
 
-# Passing the first stage
+- Always **12 bytes** long
+- Integers are encoded in Big-endian
 
-The entry point for your `your_server.sh` implementation is in `src/main.rs`.
-Study and uncomment the relevant code, and push your changes to pass the first
-stage:
+| Field                             | Size (bits) | Description                                  |
+| --------------------------------- | ----------- | -------------------------------------------- |
+| Packet Identifier (ID)            | 16          | Resp must have same ID                       |
+| Query/Response Indicator (QR)     | 1           | 0 -> Question / 1 -> Resp                    |
+| OperationCode (OPCODE)            | 4           | kind of query                                |
+| Authority Answer (AA)             | 1           | 1 -> resp server "owns" queried domain       |
+| Truncation (TC)                   | 1           | 1 -> msg size > 512 bytes; 0 -> for UDP resp |
+| Recursion Desired (RD)            | 1           | 1 -> recursively resolve query               |
+| Recursion Available (RA)          | 1           | 1 -> recursion is available                  |
+| Reserved (Z)                      | 3           | Used by DNSSEC queries                       |
+| Response Code (RCODE)             | 4           | Status of Resp                               |
+| Question Count (QDCOUNT)          | 16          | #Questions in Question section               |
+| Answer record Count (ANCOUNT)     | 16          | #records in Answer section                   |
+| Authority record Count (NSCOUNT)  | 16          | #records in Authority section                |
+| Additional record Count (ARCOUNT) | 16          | #records in Additional section               |
 
-```sh
-git add .
-git commit -m "pass 1st stage" # any msg
-git push origin master
-```
+> Ref: [DNS Protocol](https://github.com/EmilHernvall/dnsguide/blob/b52da3b32b27c81e5c6729ac14fe01fef8b1b593/chapter1.md)
+> [RFC](https://datatracker.ietf.org/doc/html/rfc1035#section-4.1)
 
-Time to move on to the next stage!
-
-# Stage 2 & beyond
-
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `cargo (1.70)` installed locally
-1. Run `./your_server.sh` to run your program, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+- OPCODE:
+	- 0: a standard query (QUERY)
+	- 1: an inverse query (IQUERY)
+	- 2: a server status request (STATUS)
+	- 3-15: reserved for future use
