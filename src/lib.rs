@@ -117,3 +117,110 @@ impl Header {
         resp
     }
 }
+
+#[derive(Debug)]
+pub struct Question {
+    pub name: String,
+    pub qtype: u16,
+    pub class: u16,
+}
+
+impl Question {
+    pub fn from_bytes(buf: &[u8]) -> Self {
+        let mut bytes_to_read: usize;
+        let mut name = String::new();
+        let mut i: usize = 0;
+        loop {
+            bytes_to_read = buf[i] as usize;
+            // end of q
+            if bytes_to_read == 0 {
+                break;
+            }
+            // start of str -> dont add '.'
+            // else for each end of part add '.'
+            if i != 0 {
+                name.push('.');
+            }
+            // start from next char till end
+            (1..bytes_to_read + 1).for_each(|x| {
+                name.push(buf[i + x] as char);
+            });
+            i += bytes_to_read + 1;
+        }
+
+        let qtype = ((buf[i + 1] as u16) << 8) | buf[i + 2] as u16;
+        let class = ((buf[i + 3] as u16) << 8) | buf[i + 4] as u16;
+
+        Question { name, qtype, class }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut resp = Vec::new();
+
+        self.name.split('.').for_each(|x| {
+            resp.push(x.len() as u8);
+            x.chars().for_each(|c| {
+                resp.push(c as u8);
+            });
+        });
+
+        resp.push(0);
+
+        resp.push((self.qtype >> 8) as u8);
+        resp.push(self.qtype as u8);
+
+        resp.push((self.class >> 8) as u8);
+        resp.push(self.class as u8);
+
+        resp
+    }
+}
+
+#[derive(Debug)]
+pub struct Message {
+    pub header: Header,
+    pub questions: Vec<Question>,
+}
+
+impl Message {
+    pub fn from_bytes(req: [u8; 512]) -> Message {
+        let header = Header::from_bytes(&req[..12]);
+        let mut questions = Vec::new();
+        let mut start = 12;
+
+        for _ in 0..header.qdcount {
+            let mut end_of_q = start;
+            while req[end_of_q] != 0 {
+                end_of_q += 1;
+            }
+            end_of_q += 1;
+            end_of_q += 4;
+            let q = &req[start..end_of_q];
+            questions.push(Question::from_bytes(&q));
+            start += end_of_q;
+        }
+        println!("Questions: {questions:?}");
+
+        Message { header, questions }
+    }
+
+    pub fn to_bytes(&self) -> [u8; 512] {
+        let mut resp = [0 as u8; 512];
+        resp[..12].copy_from_slice(&self.header.to_bytes());
+        let mut start = 12;
+        for q in &self.questions {
+            let qbytes = q.to_bytes();
+            for i in 0..qbytes.len() {
+                resp[start + i] = qbytes[i];
+            }
+            // resp[start..qbytes.len()].copy_from_slice(&qbytes);
+            start += qbytes.len();
+        }
+        resp
+    }
+
+    pub fn format_as_response_message(&mut self) {
+        self.header.qr = QueryResponseIndicator::Response;
+        self.header.qdcount = self.questions.len() as u16;
+    }
+}

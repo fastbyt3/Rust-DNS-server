@@ -10,6 +10,25 @@
 
 ## Header
 
+```
+
+                                    1  1  1  1  1  1
+      0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                      ID                       |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                    QDCOUNT                    |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                    ANCOUNT                    |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                    NSCOUNT                    |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                    ARCOUNT                    |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+```
+
 - Always **12 bytes** long
 - Integers are encoded in Big-endian
 
@@ -37,3 +56,38 @@
 	- 1: an inverse query (IQUERY)
 	- 2: a server status request (STATUS)
 	- 3-15: reserved for future use
+ 
+ ## Question section
+
+ 1. Name -> sequence of "labels" (encoded)
+ 2. Type -> **2-byte int** type of record
+ 3. Class -> **2-byte int** usually set to 1
+ 
+### Domain name encoding
+
+```
+                                    1  1  1  1  1  1
+      0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                                               |
+    /                     QNAME                     /
+    /                                               /
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                     QTYPE                     |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    |                     QCLASS                    |
+    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+	```
+
+- `<length><content>..\x00`
+    - length: 1 Byte -> label len
+    - `\x00` -> terminator
+
+```
+\x06google\x03com\x00 => google.com
+- read 6 chars
+- read 3 chars
+- null => break
+```
+
+
