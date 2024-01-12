@@ -15,11 +15,12 @@ impl QueryResponseIndicator {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
     Query = 0,
     InverseQuery = 1,
     Status = 2,
+    FutureUse,
 }
 
 impl OpCode {
@@ -29,7 +30,7 @@ impl OpCode {
             0 => Self::Query,
             1 => Self::InverseQuery,
             2 => Self::Status,
-            3..=15 => panic!("Opcode value reserved for future use"),
+            3..=15 => Self::FutureUse,
             _ => panic!("Invalid opcode value"),
         }
     }
@@ -79,7 +80,7 @@ pub struct Header {
 
 impl Header {
     pub fn from_bytes(buf: &[u8]) -> Self {
-        Self {
+        let mut x = Self {
             id: ((buf[0] as u16) << 8) | buf[1] as u16,
             qr: QueryResponseIndicator::from_byte(buf[2]),
             opcode: OpCode::from_byte(buf[2]),
@@ -93,7 +94,17 @@ impl Header {
             ancount: ((buf[6] as u16) << 8) | buf[7] as u16,
             nscount: ((buf[8] as u16) << 8) | buf[9] as u16,
             arcount: ((buf[10] as u16) << 8) | buf[11] as u16,
-        }
+        };
+        println!("Recv OPCODE: {:?}", x.opcode);
+        println!("Recv RCODE: {:?}", x.rcode);
+        x.rcode = if x.opcode == OpCode::Query {
+            ResponseCode::NoError
+        } else {
+            ResponseCode::NotImplemented
+        };
+        println!("Sending OPCODE: {:?}", x.opcode);
+        println!("Sending RCODE: {:?}", x.rcode);
+        x
     }
 
     pub fn to_bytes(&self) -> [u8; 12] {
@@ -172,16 +183,7 @@ impl Message {
             start += end_of_q;
         }
 
-        let mut answers = Vec::new();
-        answers.push(Answer {
-            name: String::from("codecrafters.io"),
-            atype: AnswerType::A,
-            class: 1,
-            ttl: 60,
-            rdlength: 4,
-            rdata: [8, 8, 8, 8].to_vec(),
-        });
-        println!("{answers:?}");
+        let answers = Vec::new();
 
         Message {
             header,
@@ -212,6 +214,18 @@ impl Message {
     }
 
     pub fn format_as_response_message(&mut self) {
+        let mut answers = Vec::new();
+        answers.push(Answer {
+            name: String::from("codecrafters.io"),
+            atype: AnswerType::A,
+            class: 1,
+            ttl: 60,
+            rdlength: 4,
+            rdata: [8, 8, 8, 8].to_vec(),
+        });
+        // println!("{answers:?}");
+        self.answers = answers;
+
         self.header.qr = QueryResponseIndicator::Response;
         self.header.qdcount = self.questions.len() as u16;
         self.header.ancount = self.answers.len() as u16;
