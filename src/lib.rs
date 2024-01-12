@@ -306,6 +306,18 @@ impl Label {
         let mut i: usize = 0;
         loop {
             bytes_to_read = buf[i] as usize;
+            // PTR check
+            // first 2 bits == 1
+            if bytes_to_read & 0b11000000 == 0b11000000 {
+                name.push('.');
+                let offset =
+                    (((bytes_to_read & 0b00111111) as u16) << 8 | buf[i + 1] as u16) as usize;
+                let (repeated_label, _) = Label::decode(&buf[offset..]);
+                repeated_label.0.chars().for_each(|c| name.push(c));
+                println!("Label got using offset: {}", name);
+                i += 1;
+                break;
+            }
             // end of q
             if bytes_to_read == 0 {
                 break;
