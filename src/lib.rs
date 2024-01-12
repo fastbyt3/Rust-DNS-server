@@ -95,15 +95,11 @@ impl Header {
             nscount: ((buf[8] as u16) << 8) | buf[9] as u16,
             arcount: ((buf[10] as u16) << 8) | buf[11] as u16,
         };
-        println!("Recv OPCODE: {:?}", x.opcode);
-        println!("Recv RCODE: {:?}", x.rcode);
         x.rcode = if x.opcode == OpCode::Query {
             ResponseCode::NoError
         } else {
             ResponseCode::NotImplemented
         };
-        println!("Sending OPCODE: {:?}", x.opcode);
-        println!("Sending RCODE: {:?}", x.rcode);
         x
     }
 
@@ -213,21 +209,31 @@ impl Message {
         resp
     }
 
-    pub fn format_as_response_message(&mut self) {
+    pub fn prepare_response(&mut self) {
         let mut answers = Vec::new();
-        answers.push(Answer {
-            name: String::from("codecrafters.io"),
-            atype: AnswerType::A,
-            class: 1,
-            ttl: 60,
-            rdlength: 4,
-            rdata: [8, 8, 8, 8].to_vec(),
-        });
+        // answers.push(Answer {
+        //     name: String::from("codecrafters.io"),
+        //     atype: AnswerType::A,
+        //     class: 1,
+        //     ttl: 60,
+        //     rdlength: 4,
+        //     rdata: [8, 8, 8, 8].to_vec(),
+        // });
         // println!("{answers:?}");
-        self.answers = answers;
-
         self.header.qr = QueryResponseIndicator::Response;
         self.header.qdcount = self.questions.len() as u16;
+        for i in 0..self.header.qdcount {
+            let q = self.questions.get(i as usize).unwrap();
+            answers.push(Answer {
+                name: q.name.clone(),
+                atype: AnswerType::A,
+                class: 1,
+                ttl: 60,
+                rdlength: 4,
+                rdata: [8, 8, 8, 8].to_vec(),
+            });
+        }
+        self.answers = answers;
         self.header.ancount = self.answers.len() as u16;
     }
 }
@@ -270,7 +276,7 @@ impl AnswerType {
 
 #[derive(Debug)]
 pub struct Answer {
-    pub name: String,
+    pub name: Label,
     pub atype: AnswerType,
     pub class: u16,
     pub ttl: u32,
@@ -280,8 +286,7 @@ pub struct Answer {
 
 impl Answer {
     fn to_bytes(&self) -> Vec<u8> {
-        let label = Label(self.name.clone());
-        let mut answer_bytes = label.encode();
+        let mut answer_bytes = self.name.encode();
         answer_bytes.extend_from_slice(&self.atype.get_val().to_be_bytes());
         answer_bytes.extend_from_slice(&self.class.to_be_bytes());
         answer_bytes.extend_from_slice(&self.ttl.to_be_bytes());
@@ -291,7 +296,7 @@ impl Answer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Label(String);
 
 impl Label {

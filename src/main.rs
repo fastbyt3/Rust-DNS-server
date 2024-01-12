@@ -14,9 +14,7 @@ fn main() {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
                 let mut msg = Message::from_bytes(buf);
-                println!("Received: {msg:?}");
-                msg.format_as_response_message();
-                println!("Sending: {msg:?}");
+                msg.prepare_response();
                 udp_socket
                     .send_to(&msg.to_bytes(), source)
                     .expect("Failed to send response");
