@@ -120,13 +120,168 @@ impl Header {
 
 #[derive(Debug)]
 pub struct Question {
-    pub name: String,
+    pub name: Label,
     pub qtype: u16,
     pub class: u16,
 }
 
 impl Question {
     pub fn from_bytes(buf: &[u8]) -> Self {
+        let (name, bytes_read) = Label::decode(buf);
+        let qtype = ((buf[bytes_read + 1] as u16) << 8) | buf[bytes_read + 2] as u16;
+        let class = ((buf[bytes_read + 3] as u16) << 8) | buf[bytes_read + 4] as u16;
+
+        Question { name, qtype, class }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut resp = self.name.encode();
+
+        resp.push((self.qtype >> 8) as u8);
+        resp.push(self.qtype as u8);
+
+        resp.push((self.class >> 8) as u8);
+        resp.push(self.class as u8);
+
+        resp
+    }
+}
+
+#[derive(Debug)]
+pub struct Message {
+    pub header: Header,
+    pub questions: Vec<Question>,
+    pub answers: Vec<Answer>,
+}
+
+impl Message {
+    pub fn from_bytes(req: [u8; 512]) -> Message {
+        let header = Header::from_bytes(&req[..12]);
+        let mut questions = Vec::new();
+        let mut start = 12;
+
+        for _ in 0..header.qdcount {
+            let mut end_of_q = start;
+            while req[end_of_q] != 0 {
+                end_of_q += 1;
+            }
+            end_of_q += 1;
+            end_of_q += 4;
+            let q = &req[start..end_of_q];
+            questions.push(Question::from_bytes(&q));
+            start += end_of_q;
+        }
+
+        let mut answers = Vec::new();
+        answers.push(Answer {
+            name: String::from("codecrafters.io"),
+            atype: AnswerType::A,
+            class: 1,
+            ttl: 60,
+            rdlength: 4,
+            rdata: [8, 8, 8, 8].to_vec(),
+        });
+        println!("{answers:?}");
+
+        Message {
+            header,
+            questions,
+            answers,
+        }
+    }
+
+    pub fn to_bytes(&self) -> [u8; 512] {
+        let mut resp = [0 as u8; 512];
+        resp[..12].copy_from_slice(&self.header.to_bytes());
+        let mut start = 12;
+        for q in &self.questions {
+            let qbytes = q.to_bytes();
+            for i in 0..qbytes.len() {
+                resp[start + i] = qbytes[i];
+            }
+            // resp[start..qbytes.len()].copy_from_slice(&qbytes);
+            start += qbytes.len();
+        }
+        for a in &self.answers {
+            let ab = a.to_bytes();
+            for i in 0..ab.len() {
+                resp[start + i] = ab[i];
+            }
+        }
+        resp
+    }
+
+    pub fn format_as_response_message(&mut self) {
+        self.header.qr = QueryResponseIndicator::Response;
+        self.header.qdcount = self.questions.len() as u16;
+        self.header.ancount = self.answers.len() as u16;
+    }
+}
+
+// For this stage
+// --------------
+// Name: codecrafters.io
+// Type: 1 <- AA
+// Class: 1 <- IN record class
+// TTL: 60 (or any val)
+// RDLEN: 4
+// RDATA: Any ip addr: \x08\x08\x08\x08 => 8.8.8.8
+//
+// Also update ANCOUNT in Header
+#[derive(Debug, Clone, Copy)]
+pub enum AnswerType {
+    A = 1,
+    NS = 2,
+    MD = 3,
+    MF = 4,
+    CNAME = 5,
+    SOA = 6,
+    MB = 7,
+    MG = 8,
+    MR = 9,
+    NULL = 10,
+    WKS = 11,
+    PTR = 12,
+    HINFO = 13,
+    MINFO = 14,
+    MX = 15,
+    TXT = 16,
+}
+
+impl AnswerType {
+    fn get_val(&self) -> u16 {
+        self.clone() as u16
+    }
+}
+
+#[derive(Debug)]
+pub struct Answer {
+    pub name: String,
+    pub atype: AnswerType,
+    pub class: u16,
+    pub ttl: u32,
+    pub rdlength: u16,
+    pub rdata: Vec<u8>,
+}
+
+impl Answer {
+    fn to_bytes(&self) -> Vec<u8> {
+        let label = Label(self.name.clone());
+        let mut answer_bytes = label.encode();
+        answer_bytes.extend_from_slice(&self.atype.get_val().to_be_bytes());
+        answer_bytes.extend_from_slice(&self.class.to_be_bytes());
+        answer_bytes.extend_from_slice(&self.ttl.to_be_bytes());
+        answer_bytes.extend_from_slice(&self.rdlength.to_be_bytes());
+        answer_bytes.extend_from_slice(&self.rdata);
+        answer_bytes
+    }
+}
+
+#[derive(Debug)]
+pub struct Label(String);
+
+impl Label {
+    fn decode(buf: &[u8]) -> (Label, usize) {
         let mut bytes_to_read: usize;
         let mut name = String::new();
         let mut i: usize = 0;
@@ -147,80 +302,16 @@ impl Question {
             });
             i += bytes_to_read + 1;
         }
-
-        let qtype = ((buf[i + 1] as u16) << 8) | buf[i + 2] as u16;
-        let class = ((buf[i + 3] as u16) << 8) | buf[i + 4] as u16;
-
-        Question { name, qtype, class }
+        (Label(name), i)
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut resp = Vec::new();
-
-        self.name.split('.').for_each(|x| {
-            resp.push(x.len() as u8);
-            x.chars().for_each(|c| {
-                resp.push(c as u8);
-            });
+    fn encode(&self) -> Vec<u8> {
+        let mut enc = Vec::new();
+        self.0.split('.').for_each(|s| {
+            enc.push(s.len() as u8);
+            s.chars().for_each(|c| enc.push(c as u8));
         });
-
-        resp.push(0);
-
-        resp.push((self.qtype >> 8) as u8);
-        resp.push(self.qtype as u8);
-
-        resp.push((self.class >> 8) as u8);
-        resp.push(self.class as u8);
-
-        resp
-    }
-}
-
-#[derive(Debug)]
-pub struct Message {
-    pub header: Header,
-    pub questions: Vec<Question>,
-}
-
-impl Message {
-    pub fn from_bytes(req: [u8; 512]) -> Message {
-        let header = Header::from_bytes(&req[..12]);
-        let mut questions = Vec::new();
-        let mut start = 12;
-
-        for _ in 0..header.qdcount {
-            let mut end_of_q = start;
-            while req[end_of_q] != 0 {
-                end_of_q += 1;
-            }
-            end_of_q += 1;
-            end_of_q += 4;
-            let q = &req[start..end_of_q];
-            questions.push(Question::from_bytes(&q));
-            start += end_of_q;
-        }
-        println!("Questions: {questions:?}");
-
-        Message { header, questions }
-    }
-
-    pub fn to_bytes(&self) -> [u8; 512] {
-        let mut resp = [0 as u8; 512];
-        resp[..12].copy_from_slice(&self.header.to_bytes());
-        let mut start = 12;
-        for q in &self.questions {
-            let qbytes = q.to_bytes();
-            for i in 0..qbytes.len() {
-                resp[start + i] = qbytes[i];
-            }
-            // resp[start..qbytes.len()].copy_from_slice(&qbytes);
-            start += qbytes.len();
-        }
-        resp
-    }
-
-    pub fn format_as_response_message(&mut self) {
-        self.header.qr = QueryResponseIndicator::Response;
-        self.header.qdcount = self.questions.len() as u16;
+        enc.push(0);
+        enc
     }
 }
