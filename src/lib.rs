@@ -1,3 +1,5 @@
+use std::net::UdpSocket;
+
 #[derive(Debug, Clone, Copy)]
 pub enum QueryResponseIndicator {
     Query = 0,
@@ -125,7 +127,7 @@ impl Header {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Question {
     pub name: Label,
     pub qtype: u16,
@@ -133,8 +135,9 @@ pub struct Question {
 }
 
 impl Question {
-    pub fn from_bytes(buf: &[u8]) -> Self {
-        let (name, bytes_read) = Label::decode(buf);
+    pub fn from_bytes(buf: &[u8], whole_buf: &[u8]) -> Self {
+        println!(" ==> Parsing QUESTION !!");
+        let (name, bytes_read) = Label::decode(buf, whole_buf);
         let qtype = ((buf[bytes_read + 1] as u16) << 8) | buf[bytes_read + 2] as u16;
         let class = ((buf[bytes_read + 3] as u16) << 8) | buf[bytes_read + 4] as u16;
 
@@ -154,7 +157,7 @@ impl Question {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Message {
     pub header: Header,
     pub questions: Vec<Question>,
@@ -175,11 +178,23 @@ impl Message {
             end_of_q += 1;
             end_of_q += 4;
             let q = &req[start..end_of_q];
-            questions.push(Question::from_bytes(&q));
-            start += end_of_q;
+            questions.push(Question::from_bytes(&q, &req));
+            start = end_of_q;
         }
 
-        let answers = Vec::new();
+        let mut answers = Vec::new();
+        for _ in 0..header.ancount {
+            let mut end_of_ans = start;
+            while req[end_of_ans] != 0 {
+                end_of_ans += 1;
+            }
+            end_of_ans += 1;
+            // println!("Start: {start} ;; End: {end_of_ans}");
+            // println!("Buf: {:?}", &req[start..]);
+            let ans = Answer::from_bytes(&req[start..], &req);
+            start = end_of_ans + 10 + ans.rdlength as usize;
+            answers.push(ans);
+        }
 
         Message {
             header,
@@ -211,15 +226,6 @@ impl Message {
 
     pub fn prepare_response(&mut self) {
         let mut answers = Vec::new();
-        // answers.push(Answer {
-        //     name: String::from("codecrafters.io"),
-        //     atype: AnswerType::A,
-        //     class: 1,
-        //     ttl: 60,
-        //     rdlength: 4,
-        //     rdata: [8, 8, 8, 8].to_vec(),
-        // });
-        // println!("{answers:?}");
         self.header.qr = QueryResponseIndicator::Response;
         self.header.qdcount = self.questions.len() as u16;
         for i in 0..self.header.qdcount {
@@ -235,6 +241,42 @@ impl Message {
         }
         self.answers = answers;
         self.header.ancount = self.answers.len() as u16;
+    }
+
+    pub fn forward_requests_to(&mut self, ip: String) {
+        let mut msgs: Vec<Message> = Vec::new();
+
+        self.questions.iter().for_each(|q| {
+            let mut msg = self.clone();
+            msg.header.qdcount = 1;
+            msg.questions = vec![q.clone()];
+            msg.answers = vec![];
+            msgs.push(msg);
+        });
+
+        let mut resps: Vec<Message> = Vec::new();
+        let udp_socket = UdpSocket::bind("127.0.0.1:2054").unwrap();
+        let mut buf = [0; 512];
+
+        msgs.iter().for_each(|m| {
+            udp_socket.send_to(&(m.to_bytes()), &ip).unwrap();
+            udp_socket.recv_from(&mut buf).unwrap();
+            // resps.push(Message::from_bytes(buf));
+            let m = Message::from_bytes(buf);
+            resps.push(m);
+        });
+
+        let qs: Vec<Question> = resps.iter().flat_map(|r| r.questions.clone()).collect();
+        let ans: Vec<Answer> = resps.iter().flat_map(|r| r.answers.clone()).collect();
+
+        // println!("---- QUESTIONS: {qs:?}");
+        // println!("---- ANSWERS: {ans:?}");
+
+        self.header.qr = QueryResponseIndicator::Response;
+        self.header.qdcount = qs.len() as u16;
+        self.header.ancount = ans.len() as u16;
+        self.questions = qs;
+        self.answers = ans;
     }
 }
 
@@ -269,12 +311,20 @@ pub enum AnswerType {
 }
 
 impl AnswerType {
+    fn parse(x: u16) -> Self {
+        match x {
+            1 => AnswerType::A,
+            2..=16 => unimplemented!(),
+            _ => panic!("Not accepted"),
+        }
+    }
+
     fn get_val(&self) -> u16 {
         self.clone() as u16
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Answer {
     pub name: Label,
     pub atype: AnswerType,
@@ -285,6 +335,31 @@ pub struct Answer {
 }
 
 impl Answer {
+    fn from_bytes(buf: &[u8], whole_buf: &[u8]) -> Self {
+        println!(" ==> Parsing ANSWER");
+        let (name, bytes_read) = Label::decode(buf, whole_buf);
+        let atype: AnswerType =
+            AnswerType::parse(((buf[bytes_read + 1] as u16) << 8) | buf[bytes_read + 2] as u16);
+        let class = ((buf[bytes_read + 3] as u16) << 8) | buf[bytes_read + 4] as u16;
+        let ttl = ((buf[bytes_read + 5] as u32) << 24)
+            | ((buf[bytes_read + 6] as u32) << 16)
+            | ((buf[bytes_read + 7] as u32) << 8)
+            | buf[bytes_read + 8] as u32;
+        let rdlength = ((buf[bytes_read + 9] as u16) << 8) | buf[bytes_read + 10] as u16;
+        let mut rdata = Vec::new();
+        for i in 0..rdlength {
+            rdata.push(buf[bytes_read + 11 + i as usize]);
+        }
+        Answer {
+            name,
+            atype,
+            class,
+            ttl,
+            rdlength,
+            rdata,
+        }
+    }
+
     fn to_bytes(&self) -> Vec<u8> {
         let mut answer_bytes = self.name.encode();
         answer_bytes.extend_from_slice(&self.atype.get_val().to_be_bytes());
@@ -300,7 +375,7 @@ impl Answer {
 pub struct Label(String);
 
 impl Label {
-    fn decode(buf: &[u8]) -> (Label, usize) {
+    fn decode(buf: &[u8], whole_buf: &[u8]) -> (Label, usize) {
         let mut bytes_to_read: usize;
         let mut name = String::new();
         let mut i: usize = 0;
@@ -309,12 +384,13 @@ impl Label {
             // PTR check
             // first 2 bits == 1
             if bytes_to_read & 0b11000000 == 0b11000000 {
+                println!("!! :: ==> Using OFFSET");
+                println!("{buf:?}");
                 name.push('.');
                 let offset =
                     (((bytes_to_read & 0b00111111) as u16) << 8 | buf[i + 1] as u16) as usize;
-                let (repeated_label, _) = Label::decode(&buf[offset..]);
+                let (repeated_label, _) = Label::decode(&whole_buf[offset..], whole_buf);
                 repeated_label.0.chars().for_each(|c| name.push(c));
-                println!("Label got using offset: {}", name);
                 i += 1;
                 break;
             }

@@ -198,3 +198,14 @@ ARPA
     92 |           0           |                       |
        +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 ```
+
+## Forwarding server
+
+- A forwarding DNS server(DNS forwarder), configured to pass DNS queries it receives from clients to another DNS server for resolution.
+    - instead of looking it up in local cache / authoritative records
+
+- For our program use resolver if we recv cli arg: `--resolver <IP:PORT>` 
+- Assumptions in our use case:
+    - It will always respond with an answer section for the queries that originate from the tester.
+	- It will not contain other sections like (authority section and additional section)
+	- It will only respond when there is only one question in the question section. If you send multiple questions in the question section, it will not respond at all. So when you receive multiple questions in the question section you will need to split it into two DNS packets and then send them to this resolver then merge the response in a single packet.
